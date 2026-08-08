@@ -1,7 +1,7 @@
 <?php
 /**
- * Plugin Name: Arkisto Reporter
- * Description: Reports installed plugins to an Arkisto catalog for active-install tracking.
+ * Plugin Name: Arkisto Plugin Manager
+ * Description: Reports back installed plugin information to Arkisto for tracking and updating plugins.
  * Version: 1.0.0
  * Author: Atomic Smash
  * Text Domain: arkisto-reporter
@@ -12,6 +12,7 @@ if (! defined('ABSPATH')) {
 
 define('ARKISTO_REPORTER_VERSION', '1.0.0');
 define('ARKISTO_REPORTER_OPTION', 'arkisto_reporter_settings');
+define('ARKISTO_REPORTER_DEFAULT_API_BASE_URL', 'https://arkisto.atomicsmash.co.uk');
 
 /**
  * Register settings page.
@@ -31,7 +32,7 @@ add_action('admin_init', function () {
         'type' => 'array',
         'sanitize_callback' => 'arkisto_reporter_sanitize_settings',
         'default' => [
-            'api_base_url' => '',
+            'api_base_url' => ARKISTO_REPORTER_DEFAULT_API_BASE_URL,
             'registration_token' => '',
             'site_token' => '',
             'site_name' => get_bloginfo('name'),
@@ -47,12 +48,42 @@ function arkisto_reporter_sanitize_settings($input)
 {
     $current = get_option(ARKISTO_REPORTER_OPTION, []);
 
+    $api_base_url = isset($input['api_base_url'])
+        ? esc_url_raw(untrailingslashit($input['api_base_url']))
+        : ($current['api_base_url'] ?? ARKISTO_REPORTER_DEFAULT_API_BASE_URL);
+
+    if ($api_base_url === '') {
+        $api_base_url = ARKISTO_REPORTER_DEFAULT_API_BASE_URL;
+    }
+
     return [
-        'api_base_url' => isset($input['api_base_url']) ? esc_url_raw(untrailingslashit($input['api_base_url'])) : ($current['api_base_url'] ?? ''),
+        'api_base_url' => $api_base_url,
         'registration_token' => isset($input['registration_token']) ? sanitize_text_field($input['registration_token']) : ($current['registration_token'] ?? ''),
         'site_token' => isset($input['site_token']) ? sanitize_text_field($input['site_token']) : ($current['site_token'] ?? ''),
         'site_name' => isset($input['site_name']) ? sanitize_text_field($input['site_name']) : ($current['site_name'] ?? get_bloginfo('name')),
     ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function arkisto_reporter_get_settings()
+{
+    $settings = get_option(ARKISTO_REPORTER_OPTION, []);
+
+    if (! is_array($settings)) {
+        $settings = [];
+    }
+
+    if (empty($settings['api_base_url'])) {
+        $settings['api_base_url'] = ARKISTO_REPORTER_DEFAULT_API_BASE_URL;
+    }
+
+    if (empty($settings['site_name'])) {
+        $settings['site_name'] = get_bloginfo('name');
+    }
+
+    return $settings;
 }
 
 function arkisto_reporter_render_settings_page()
@@ -61,7 +92,7 @@ function arkisto_reporter_render_settings_page()
         return;
     }
 
-    $settings = get_option(ARKISTO_REPORTER_OPTION, []);
+    $settings = arkisto_reporter_get_settings();
     ?>
     <div class="wrap">
         <h1>Arkisto Reporter</h1>
@@ -70,7 +101,8 @@ function arkisto_reporter_render_settings_page()
             <table class="form-table" role="presentation">
                 <tr>
                     <th scope="row"><label for="arkisto_api_base_url">API base URL</label></th>
-                    <td><input class="regular-text" type="url" id="arkisto_api_base_url" name="<?php echo esc_attr(ARKISTO_REPORTER_OPTION); ?>[api_base_url]" value="<?php echo esc_attr($settings['api_base_url'] ?? ''); ?>" placeholder="https://arkisto.example/api" /></td>
+                    <td><input class="regular-text" type="url" id="arkisto_api_base_url" name="<?php echo esc_attr(ARKISTO_REPORTER_OPTION); ?>[api_base_url]" value="<?php echo esc_attr($settings['api_base_url']); ?>" placeholder="<?php echo esc_attr(ARKISTO_REPORTER_DEFAULT_API_BASE_URL); ?>" />
+                    <p class="description">Defaults to <?php echo esc_html(ARKISTO_REPORTER_DEFAULT_API_BASE_URL); ?>. Override only if pointing at a different Arkisto instance.</p></td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="arkisto_registration_token">Registration token</label></th>
@@ -150,12 +182,12 @@ register_deactivation_hook(__FILE__, function () {
  */
 function arkisto_reporter_register_site()
 {
-    $settings = get_option(ARKISTO_REPORTER_OPTION, []);
+    $settings = arkisto_reporter_get_settings();
     $api = untrailingslashit($settings['api_base_url'] ?? '');
     $token = $settings['registration_token'] ?? '';
 
-    if ($api === '' || $token === '') {
-        return new WP_Error('arkisto_missing', 'API base URL and registration token are required.');
+    if ($token === '') {
+        return new WP_Error('arkisto_missing', 'Registration token is required.');
     }
 
     $response = wp_remote_post($api.'/sites/register', [
@@ -190,12 +222,12 @@ function arkisto_reporter_register_site()
  */
 function arkisto_reporter_send_heartbeat()
 {
-    $settings = get_option(ARKISTO_REPORTER_OPTION, []);
+    $settings = arkisto_reporter_get_settings();
     $api = untrailingslashit($settings['api_base_url'] ?? '');
     $token = $settings['site_token'] ?? '';
 
-    if ($api === '' || $token === '') {
-        return new WP_Error('arkisto_missing', 'API base URL and site token are required. Register the site first.');
+    if ($token === '') {
+        return new WP_Error('arkisto_missing', 'Site token is required. Register the site first.');
     }
 
     if (! function_exists('get_plugins')) {
