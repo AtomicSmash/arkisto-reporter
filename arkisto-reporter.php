@@ -263,6 +263,8 @@ function arkisto_reporter_send_heartbeat()
         'body' => wp_json_encode([
             'name' => $settings['site_name'] ?? get_bloginfo('name'),
             'url' => home_url('/'),
+            'php_version' => PHP_VERSION,
+            'wordpress_version' => get_bloginfo('version'),
             'plugins' => $plugins,
         ]),
     ]);
